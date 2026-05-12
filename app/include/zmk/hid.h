@@ -254,6 +254,8 @@ void zmk_hid_mouse_movement_set(int16_t x, int16_t y);
 void zmk_hid_mouse_scroll_set(int8_t x, int8_t y);
 void zmk_hid_mouse_movement_update(int16_t x, int16_t y);
 void zmk_hid_mouse_scroll_update(int8_t x, int8_t y);
+/* Zero relative movement/scroll in the mouse report; keeps button bits. Call after each HID send. */
+void zmk_hid_mouse_clear_relative_deltas(void);
 void zmk_hid_mouse_clear();
 
 struct zmk_hid_keyboard_report *zmk_hid_get_keyboard_report();

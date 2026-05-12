@@ -1,6 +1,7 @@
 #include <drivers/sensor.h>
 #include <devicetree.h>
 #include <init.h>
+#include <kernel.h>
 
 #include <logging/log.h>
 
@@ -14,6 +15,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/event_manager.h>
 #include <zmk/events/pd_raw_event.h>
 #include <zmk/events/endpoint_selection_changed.h>
+#include <zmk/events/activity_state_changed.h>
+#include <zmk/activity.h>
 #include <sys/atomic.h>
 
 #if ZMK_KEYMAP_HAS_TRACKBALLS
@@ -64,6 +67,11 @@ void zmk_trackballs_process_msgq(struct k_work *work) {
 }
 
 K_WORK_DEFINE(zmk_trackballs_msgq_work, zmk_trackballs_process_msgq);
+
+/* Re-arm motion IRQ after deep sleep (cold boot) or when PMW3610 async init races trackballs init. */
+static void trackballs_rearm_all(void);
+static void trackballs_delayed_rearm_work(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(trackballs_delayed_rearm, trackballs_delayed_rearm_work);
 
 ATOMIC_DEFINE(timer_set_bit, 1);
 
@@ -241,13 +249,65 @@ static int zmk_trackballs_init(const struct device *_arg) {
   int absolute_index = 0;
 
   UTIL_LISTIFY(ZMK_KEYMAP_TRACKBALLS_LEN, TRACKBALL_INIT, 0)
-    return 0;
+
+  /* Second chance after PMW3610 async init + SPI stable (common after deep-sleep wake / reset). */
+  k_work_schedule(&trackballs_delayed_rearm, K_MSEC(450));
+  return 0;
 }
 
 SYS_INIT(zmk_trackballs_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
 ZMK_LISTENER(zmk_trackballs, zmk_trackballs_endpoint_listener)
 ZMK_SUBSCRIPTION(zmk_trackballs, zmk_endpoint_selection_changed)
+
+static void trackballs_rearm_all(void) {
+  for (int i = 0; i < ZMK_KEYMAP_TRACKBALLS_LEN; i++) {
+    struct trackballs_data_item *item = &trackballs[i];
+    if (!item->dev) {
+      continue;
+    }
+    k_timer_stop(&item->poll_timer);
+    item->polling_count = 0;
+    int err;
+    int retries = 0;
+    do {
+      err = sensor_trigger_set(item->dev, &item->trigger, zmk_trackballs_trigger_handler);
+      if (err == -EBUSY) {
+        k_sleep(K_MSEC(20));
+        retries++;
+      }
+    } while (err == -EBUSY && retries < 100);
+    if (err) {
+      LOG_ERR("Trackball rearm %d failed: %d", i, err);
+    } else {
+      LOG_DBG("Trackball rearm %d ok", i);
+    }
+  }
+}
+
+static void trackballs_delayed_rearm_work(struct k_work *work) {
+  ARG_UNUSED(work);
+  trackballs_rearm_all();
+}
+
+static enum zmk_activity_state trackballs_prev_activity = ZMK_ACTIVITY_ACTIVE;
+
+static int trackballs_activity_listener(const zmk_event_t *eh) {
+  struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
+  if (!ev) {
+    return -ENOTSUP;
+  }
+  if (ev->state == ZMK_ACTIVITY_ACTIVE &&
+      (trackballs_prev_activity == ZMK_ACTIVITY_IDLE ||
+       trackballs_prev_activity == ZMK_ACTIVITY_SLEEP)) {
+    trackballs_rearm_all();
+  }
+  trackballs_prev_activity = ev->state;
+  return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(trackballs_activity, trackballs_activity_listener);
+ZMK_SUBSCRIPTION(trackballs_activity, zmk_activity_state_changed);
 
 #endif
 

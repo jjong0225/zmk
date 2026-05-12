@@ -153,6 +153,8 @@ int zmk_endpoints_send_mouse_report() {
         int err = zmk_usb_hid_send_report((uint8_t *)mouse_report, sizeof(*mouse_report));
         if (err) {
             LOG_ERR("FAILED TO SEND OVER USB: %d", err);
+        } else {
+            zmk_hid_mouse_clear_relative_deltas();
         }
         return err;
     }
@@ -167,6 +169,8 @@ int zmk_endpoints_send_mouse_report() {
 #endif
         if (err) {
             LOG_ERR("FAILED TO SEND OVER HOG: %d", err);
+        } else {
+            zmk_hid_mouse_clear_relative_deltas();
         }
         return err;
     }

@@ -344,6 +344,14 @@ void zmk_hid_mouse_scroll_update(int8_t x, int8_t y) {
     LOG_DBG("Mouse scroll updated to 0x%02X 0x%02X ", mouse_report.body.scroll_x,
             mouse_report.body.scroll_y);
 }
+
+void zmk_hid_mouse_clear_relative_deltas(void) {
+    mouse_report.body.x = 0;
+    mouse_report.body.y = 0;
+    mouse_report.body.scroll_x = 0;
+    mouse_report.body.scroll_y = 0;
+}
+
 void zmk_hid_mouse_clear() { memset(&mouse_report.body, 0, sizeof(mouse_report.body)); }
 
 struct zmk_hid_keyboard_report *zmk_hid_get_keyboard_report() {
